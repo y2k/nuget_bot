@@ -71,6 +71,52 @@ module TestUtils =
         }
 
 [<Fact>]
+let ``e2e test 2`` () =
+    async {
+        let db =
+            Database.mkDatabase "main" (fun (Url x) -> x) Url
+
+        let mutable log = []
+        let mutable writeToBot = fun _ -> failwith "writeToBot not set"
+
+        do! BotService.start (fun f ->
+                writeToBot <- f
+                async.Zero()) (fun _ msg ->
+                log <- msg :: log
+                async.Zero()) db
+
+        do! writeToBot (0, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
+        Assert.Equal(box [ "Operation successful" ], log)
+
+        let! expected =
+            // ---
+            Github.getGithubVersion (Url "https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
+            |> fun a -> async.Bind(a, (fun x -> x.Value.version |> System.Version |> async.Return))
+
+        let rec whatForSync count =
+            async {
+                let! githubInfo =
+                    Github.getGithubVersion (Url "https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
+
+                let actual =
+                    githubInfo
+                    |> Option.map (fun x -> System.Version x.version)
+                    |> Option.get
+
+                if expected <> actual then
+                    if count = 0
+                    then failwithf "Version not updated to %O" expected
+                    do! Async.Sleep 2000
+                    do! whatForSync (count - 1)
+            }
+
+        do! whatForSync 10
+
+        do! SyncService.run (fun _ -> failwith "'pushToNuget' must not be called") db
+    }
+    |> Async.RunSynchronously
+
+[<Fact>]
 let ``e2e test`` () =
     async {
         let db =
@@ -110,7 +156,10 @@ let ``e2e test`` () =
 
         do! whatForSync 10
 
-        do! SyncService.run db (Environment.GetEnvironmentVariable "MYGET_TOKEN")
+        let nugetToken =
+            Environment.GetEnvironmentVariable "MYGET_TOKEN"
+
+        do! SyncService.run (DotnetNuget.pushToNuget nugetToken) db
 
         let rec whatForSync count =
             async {
@@ -128,6 +177,6 @@ let ``e2e test`` () =
                     do! whatForSync (count - 1)
             }
 
-        do! whatForSync 10
+        do! whatForSync 12
     }
     |> Async.RunSynchronously

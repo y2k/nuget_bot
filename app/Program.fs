@@ -40,6 +40,10 @@ module Domain =
                    proj = c.Value |}
         | _ -> None
 
+    let getNugetId githubUrl =
+        parseUrl githubUrl
+        |> Option.map (fun x -> sprintf "%s.%s" x.user x.repo)
+
     let private tryAddUrl db url =
         parseUrl url
         |> Option.map (fun _ -> Map.add (Url url) (Version "?") db)
@@ -279,20 +283,20 @@ module BotService =
             })
 
 module SyncService =
-    let private uploadNewVersion token (Url url) =
+    let private uploadNewVersion pushToNuget (Url url) =
         async {
             let! ngpackPath = DotnetBuild.buildNugetFromGithub url
-            do! DotnetNuget.pushToNuget token ngpackPath
+            do! pushToNuget ngpackPath
         }
 
     let private getVersionOnNuget (Url url) =
         async {
-            let info = Domain.parseUrl url |> Option.get
-            let! result = DotnetNuget.getLastVersion info.repo
+            let nugetId = Domain.getNugetId url |> Option.get
+            let! result = DotnetNuget.getLastVersion nugetId
             return result |> Option.map Version
         }
 
-    let run db nugetToken =
+    let run pushToNuget db =
         async {
             let (items: Map<Url, Version>) = Database.readAllFromDb db
             for (url, _) in items |> Map.toList do
@@ -305,13 +309,13 @@ module SyncService =
                 let! currentVersion = getVersionOnNuget url
 
                 if Option.isSome version && version <> currentVersion
-                then do! uploadNewVersion nugetToken url
+                then do! uploadNewVersion pushToNuget url
         }
 
     let runLoop db nugetToken =
         async {
             while true do
-                do! run db nugetToken
+                do! run (DotnetNuget.pushToNuget nugetToken) db
                 do! Async.Sleep 15_000
         }
 
