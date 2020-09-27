@@ -6,6 +6,29 @@ open App
 open Swensen.Unquote
 
 [<Fact>]
+let ``no empty message for ls result`` () =
+    async {
+        let db =
+            Database.mkDatabase "main" (fun (Url x) -> x) Url
+
+        let mutable log = []
+        let mutable writeToBot = fun _ -> failwith "writeToBot not set"
+
+        do! BotService.start (fun f ->
+                writeToBot <- f
+                async.Zero()) (fun _ msg ->
+                log <- msg :: log
+                async.Zero()) db
+
+        log <- []
+        do! writeToBot (0, "/ls")
+
+        Assert.Equal(1, List.length log)
+        Assert.All(log, (fun x -> Assert.False(String.IsNullOrWhiteSpace x, sprintf "'%s' is empty" x)))
+    }
+    |> Async.RunSynchronously
+
+[<Fact>]
 let ``test bot commands ls`` () =
     async {
         let db =
@@ -24,7 +47,8 @@ let ``test bot commands ls`` () =
 
         log <- []
         do! writeToBot (0, "/ls")
-        Assert.Equal(box [ "- https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj" ], log)
+        Assert.Equal
+            (box [ "Your subscriptions:\n- https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj" ], log)
     }
     |> Async.RunSynchronously
 

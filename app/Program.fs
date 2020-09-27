@@ -11,7 +11,7 @@ module MessageGenerator =
         |> Map.toSeq
         |> Seq.map (fun ((Url url), _) -> url)
         |> Seq.fold (fun a x -> a + "\n- " + x) ""
-        |> fun x -> x.Trim '\n'
+        |> fun x -> sprintf "Your subscriptions:\n%s" <| x.Trim '\n'
 
     let formatLsMessage _ = "Operation successful"
 
