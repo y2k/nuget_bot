@@ -17,6 +17,7 @@ module MessageGenerator =
 
 module ParseMsg =
     type t =
+        | Start
         | Add of string
         | Ls
         | Unknown
@@ -25,6 +26,7 @@ module ParseMsg =
         match msg.Split ' ' |> List.ofSeq with
         | [ "/add"; url ] -> Add url
         | [ "/ls" ] -> Ls
+        | [ "/start" ] -> Start
         | _ -> Unknown
 
 module Domain =
@@ -53,6 +55,8 @@ module Domain =
         match ParseMsg.parseMessage msg with
         | ParseMsg.Add url -> tryAddUrl state url, MessageGenerator.formatLsMessage ()
         | ParseMsg.Ls -> state, state |> MessageGenerator.formatMessage
+        | ParseMsg.Start ->
+            state, sprintf "Commands:\n/ls - list of packages\n/add <github url to (f|c)proj> - add package"
         | ParseMsg.Unknown -> state, sprintf "Unknown command: %s" msg
 
 module Github =
