@@ -58,22 +58,28 @@ module Domain =
 module Github =
     open Octokit
 
-    let getGithubVersion (Url url) =
-        async {
-            let info = Domain.parseUrl url |> Option.get
+    type Release = { version: string; zipUrl: string }
 
+    let getAllReleases (user: string) repo =
+        async {
             let github =
                 GitHubClient(ProductHeaderValue("nuget-bot"))
 
-            let! rs =
-                github.Repository.Release.GetAll(info.user, info.repo)
+            let! releases =
+                github.Repository.Release.GetAll(user, repo)
                 |> Async.AwaitTask
 
-            return rs
-                   |> Seq.tryHead
-                   |> Option.map (fun rs ->
-                       {| version = rs.TagName
-                          zipUrl = rs.ZipballUrl |})
+            return releases
+                   |> Seq.map (fun rs ->
+                       { version = rs.TagName
+                         zipUrl = rs.ZipballUrl })
+        }
+
+    let getGithubVersion githubGetAllReleases (Url url) =
+        async {
+            let info = Domain.parseUrl url |> Option.get
+            let! (rs: #seq<Release>) = githubGetAllReleases info.user info.repo
+            return rs |> Seq.tryHead
         }
 
 module DotnetBuild =
@@ -83,11 +89,11 @@ module DotnetBuild =
     open System.IO
     open System.IO.Compression
 
-    let buildNugetFromGithub url =
+    let buildNugetFromGithub githubGetAllReleases url =
         async {
             let info = Domain.parseUrl url |> Option.get
 
-            let! githubInfo = Github.getGithubVersion (Url url)
+            let! githubInfo = Github.getGithubVersion githubGetAllReleases (Url url)
 
             let rs = githubInfo |> Option.get
 
@@ -283,39 +289,39 @@ module BotService =
             })
 
 module SyncService =
-    let private uploadNewVersion pushToNuget (Url url) =
+    let private uploadNewVersion githubGetAllReleases pushToNuget (Url url) =
         async {
-            let! ngpackPath = DotnetBuild.buildNugetFromGithub url
+            let! ngpackPath = DotnetBuild.buildNugetFromGithub githubGetAllReleases url
             do! pushToNuget ngpackPath
         }
 
-    let private getVersionOnNuget (Url url) =
+    let private getVersionOnNuget nugetGetLastVersion (Url url) =
         async {
             let nugetId = Domain.getNugetId url |> Option.get
-            let! result = DotnetNuget.getLastVersion nugetId
+            let! result = nugetGetLastVersion nugetId
             return result |> Option.map Version
         }
 
-    let run pushToNuget db =
+    let run nugetGetLastVersion githubGetAllReleases pushToNuget db =
         async {
             let (items: Map<Url, Version>) = Database.readAllFromDb db
             for (url, _) in items |> Map.toList do
-                let! githubInfo = Github.getGithubVersion url
+                let! githubInfo = Github.getGithubVersion githubGetAllReleases url
 
                 let version =
                     githubInfo
                     |> Option.map (fun x -> Version x.version)
 
-                let! currentVersion = getVersionOnNuget url
+                let! currentVersion = getVersionOnNuget nugetGetLastVersion url
 
                 if Option.isSome version && version <> currentVersion
-                then do! uploadNewVersion pushToNuget url
+                then do! uploadNewVersion githubGetAllReleases pushToNuget url
         }
 
-    let runLoop db nugetToken =
+    let runLoop nugetGetLastVersion githubGetAllReleases db nugetToken =
         async {
             while true do
-                do! run (DotnetNuget.pushToNuget nugetToken) db
+                do! run nugetGetLastVersion githubGetAllReleases (DotnetNuget.pushToNuget nugetToken) db
                 do! Async.Sleep 15_000
         }
 
@@ -327,7 +333,7 @@ let main argv =
     let mygetToken = argv.[0]
     let telegramToken = argv.[1]
     let client = Telegram.mkClient telegramToken
-    Async.Parallel [ SyncService.runLoop db mygetToken
+    Async.Parallel [ SyncService.runLoop DotnetNuget.getLastVersion Github.getAllReleases db mygetToken
                      BotService.start (Telegram.listenUpdates client) (Telegram.writeTelegram client) db ]
     |> Async.RunSynchronously
     |> ignore
