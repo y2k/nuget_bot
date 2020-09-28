@@ -91,8 +91,7 @@ let ``e2e test`` () =
         Assert.Equal(box [ "Operation successful" ], log)
 
         let getAllReleases _ _ =
-            [ { Github.Release.version = "0.0.2"
-                Github.Release.zipUrl = "https://api.github.com/repos/y2k/nuget-test/zipball/0.0.2" } ]
+            [ "0.0.2", Uri "https://api.github.com/repos/y2k/nuget-test/zipball/0.0.2" ]
             |> Seq.ofList
             |> async.Return
 
@@ -134,8 +133,7 @@ let ``e2e test 2`` () =
         Assert.Equal(box [ "Operation successful" ], log)
 
         let getAllReleases _ _ =
-            [ { Github.Release.version = "0.0.1"
-                Github.Release.zipUrl = "" } ]
+            [ "0.0.1", Uri "https://g.com/" ]
             |> Seq.ofList
             |> async.Return
 
