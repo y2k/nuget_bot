@@ -64,10 +64,10 @@ module Github =
 
     type Release = { version: string; zipUrl: string }
 
-    let getAllReleases (user: string) repo =
+    let getAllReleases token (user: string) repo =
         async {
             let github =
-                GitHubClient(ProductHeaderValue("nuget-bot"))
+                GitHubClient(ProductHeaderValue("nuget-bot"), Credentials = Credentials token)
 
             let! releases =
                 github.Repository.Release.GetAll(user, repo)
@@ -336,8 +336,9 @@ let main argv =
 
     let mygetToken = argv.[0]
     let telegramToken = argv.[1]
+    let githubToken = argv.[2]
     let client = Telegram.mkClient telegramToken
-    Async.Parallel [ SyncService.runLoop DotnetNuget.getLastVersion Github.getAllReleases db mygetToken
+    Async.Parallel [ SyncService.runLoop DotnetNuget.getLastVersion (Github.getAllReleases githubToken) db mygetToken
                      BotService.start (Telegram.listenUpdates client) (Telegram.writeTelegram client) db ]
     |> Async.RunSynchronously
     |> ignore
