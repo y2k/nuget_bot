@@ -326,7 +326,7 @@ module SyncService =
         async {
             while true do
                 do! run nugetGetLastVersion githubGetAllReleases (DotnetNuget.pushToNuget nugetToken) db
-                do! Async.Sleep 60_000
+                do! Async.Sleep 180_000
         }
 
 [<EntryPoint>]
