@@ -143,29 +143,31 @@ module Database =
           state = ref <| readAllFromDbInner backKeyConvert col }
 
     let saveAll t newState =
-        let currentState = !t.state
-        currentState
-        |> Map.filter (fun k _ -> not <| Map.containsKey k newState)
-        |> Map.iter (fun k _ ->
-            t.collection.Delete(BsonValue.op_Implicit (t.keyConvert k))
-            |> ignore)
-        newState
-        |> Map.filter (fun k v -> Map.tryFind k currentState <> Some v)
-        |> Map.iter (fun k v ->
-            t.collection.Upsert({ id = t.keyConvert k; value = v })
-            |> ignore)
-        t.state := newState
+        async {
+            let currentState = !t.state
+            currentState
+            |> Map.filter (fun k _ -> not <| Map.containsKey k newState)
+            |> Map.iter (fun k _ ->
+                t.collection.Delete(BsonValue.op_Implicit (t.keyConvert k))
+                |> ignore)
+            newState
+            |> Map.filter (fun k v -> Map.tryFind k currentState <> Some v)
+            |> Map.iter (fun k v ->
+                t.collection.Upsert({ id = t.keyConvert k; value = v })
+                |> ignore)
+            t.state := newState
+        }
 
     let readAllFromDb t =
-        readAllFromDbInner t.backKeyConvert t.collection
+        async { return readAllFromDbInner t.backKeyConvert t.collection }
 
 module BotService =
     let start listenTelegram writeTelegram db =
         listenTelegram (fun msg ->
             async {
-                let state = Database.readAllFromDb db
+                let! state = Database.readAllFromDb db
                 let (state', outMsg) = Domain.handleMsg state msg
-                Database.saveAll db state'
+                do! Database.saveAll db state'
                 do! writeTelegram (fst msg) outMsg
             })
 
@@ -186,13 +188,14 @@ module SyncService =
     let private getGithubVersion githubGetAllReleases (Url url) =
         async {
             let info = Domain.parseUrl url |> Option.get
-            let! (rs: #seq<_>) = githubGetAllReleases info.user info.repo
+            let! rs = githubGetAllReleases info.user info.repo
             return rs |> Seq.tryHead
         }
 
     let run nugetGetLastVersion githubGetAllReleases pushToNuget db =
         async {
-            let (items: Map<Url, Version>) = Database.readAllFromDb db
+            let! (items: Map<Url, Version>) = Database.readAllFromDb db
+
             for (url, _) in items |> Map.toList do
                 let! githubInfo = getGithubVersion githubGetAllReleases url
                 let! currentVersion = getVersionOnNuget nugetGetLastVersion url
