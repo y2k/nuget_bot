@@ -2,6 +2,9 @@ module App
 
 open System
 
+type 't Updater =
+    abstract dispatch: ((('t list -> 't list * 'r))) -> 'r Async
+
 [<Struct>]
 type Url = Url of string
 
@@ -50,7 +53,7 @@ module Domain =
         |> Option.map (fun _ -> (Url url) :: db)
         |> Option.defaultValue db
 
-    let handleMsg state (_, msg) =
+    let handleMsg (_, msg) state =
         match ParseMsg.parseMessage msg with
         | ParseMsg.Add url -> tryAddUrl state url, MessageGenerator.formatLsMessage
         | ParseMsg.Ls -> state, state |> MessageGenerator.formatMessage
@@ -112,54 +115,11 @@ module DotnetBuild =
                         sprintf "bin/Release/%s.%s.%s.nupkg" info.user info.repo version)
         }
 
-module Database =
-    open LiteDB
-
-    [<CLIMutable>]
-    type 't Item = { id: string }
-
-    type t<'t when 't: comparison> =
-        { db: LiteDatabase
-          collection: ILiteCollection<'t Item>
-          keyConvert: 't -> string
-          backKeyConvert: string -> 't }
-
-    let make (collectionName: string) keyConvert backKeyConvert =
-        let db = new LiteDatabase(new IO.MemoryStream())
-        let col = db.GetCollection<_ Item>(collectionName)
-        { db = db
-          collection = col
-          keyConvert = keyConvert
-          backKeyConvert = backKeyConvert }
-
-    let saveAll t (newState: _ list) =
-        async {
-            t.db.BeginTrans() |> ignore
-
-            t.collection.DeleteAll() |> ignore
-
-            newState
-            |> List.map (fun x -> { id = t.keyConvert x })
-            |> t.collection.Insert
-            |> ignore
-
-            t.db.Commit() |> ignore
-        }
-
-    let readAllFromDb t: _ list Async =
-        async {
-            return t.collection.FindAll()
-                   |> Seq.map (fun x -> t.backKeyConvert x.id)
-                   |> Seq.toList
-        }
-
 module BotService =
-    let start listenTelegram writeTelegram db =
+    let start listenTelegram writeTelegram (db: Url Updater) =
         listenTelegram (fun msg ->
             async {
-                let! state = Database.readAllFromDb db
-                let (state', outMsg) = Domain.handleMsg state msg
-                do! Database.saveAll db state'
+                let! outMsg = db.dispatch (Domain.handleMsg msg)
                 do! writeTelegram (fst msg) outMsg
             })
 
@@ -184,9 +144,9 @@ module SyncService =
             return rs |> Seq.tryHead
         }
 
-    let run nugetGetLastVersion githubGetAllReleases pushToNuget db =
+    let run nugetGetLastVersion githubGetAllReleases pushToNuget (db: _ Updater) =
         async {
-            let! (items: Url list) = Database.readAllFromDb db
+            let! (items: Url list) = db.dispatch (fun db -> db, db)
 
             for url in items do
                 let! githubInfo = getGithubVersion githubGetAllReleases url
@@ -312,9 +272,55 @@ module Telegram =
         |> Async.AwaitTask
         |> Async.Ignore
 
+module Database =
+    open LiteDB
+
+    [<CLIMutable>]
+    type 't Item = { id: string }
+
+    type t<'t when 't: comparison> =
+        { db: LiteDatabase
+          collection: ILiteCollection<'t Item>
+          keyConvert: 't -> string
+          backKeyConvert: string -> 't }
+
+    let dispatch (t: 't t) (f: 't list -> 't list * 'r): 'r Async =
+        async {
+            t.db.BeginTrans() |> ignore
+
+            let xs =
+                t.collection.FindAll()
+                |> Seq.map (fun x -> t.backKeyConvert x.id)
+                |> Seq.toList
+
+            let (xs', r) = f xs
+
+            t.collection.DeleteAll() |> ignore
+            xs'
+            |> List.map (fun x -> { id = t.keyConvert x })
+            |> t.collection.Insert
+            |> ignore
+
+            t.db.Commit() |> ignore
+            return r
+        }
+
+    let make (collectionName: string) keyConvert backKeyConvert =
+        let db = new LiteDatabase(new IO.MemoryStream())
+        let col = db.GetCollection<_ Item>(collectionName)
+
+        let db =
+            { db = db
+              collection = col
+              keyConvert = keyConvert
+              backKeyConvert = backKeyConvert }
+
+        { new Updater<Url> with
+            member _.dispatch f = dispatch db f }
+
 [<EntryPoint>]
 let main argv =
-    let db: Database.t<Url> =
+    let db =
         Database.make "main" (fun (Url x) -> x) Url
 
     let mygetToken = argv.[0]
