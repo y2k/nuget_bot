@@ -124,11 +124,6 @@ module Database =
           keyConvert: 't -> string
           backKeyConvert: string -> 't }
 
-    let private readAllFromDbInner backKeyConvert (collection: _ ILiteCollection) =
-        collection.FindAll()
-        |> Seq.map (fun x -> backKeyConvert x.id)
-        |> Seq.toList
-
     let make (collectionName: string) keyConvert backKeyConvert =
         let db = new LiteDatabase(new IO.MemoryStream())
         let col = db.GetCollection<_ Item>(collectionName)
@@ -152,7 +147,11 @@ module Database =
         }
 
     let readAllFromDb t: _ list Async =
-        async { return readAllFromDbInner t.backKeyConvert t.collection }
+        async {
+            return t.collection.FindAll()
+                   |> Seq.map (fun x -> t.backKeyConvert x.id)
+                   |> Seq.toList
+        }
 
 module BotService =
     let start listenTelegram writeTelegram db =
