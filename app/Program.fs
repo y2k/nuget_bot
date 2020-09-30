@@ -2,17 +2,14 @@ module App
 
 open System
 
-type Url = Url of string
-
 [<Struct>]
-type Version = Version of string
+type Url = Url of string
 
 module MessageGenerator =
     let formatMessage urls =
         urls
-        |> Map.toSeq
-        |> Seq.map (fun ((Url url), _) -> url)
-        |> Seq.fold (fun a x -> a + "\n- " + x) ""
+        |> List.map (fun (Url url) -> url)
+        |> List.fold (fun a x -> a + "\n- " + x) ""
         |> fun x -> sprintf "Your subscriptions:\n%s" <| x.Trim '\n'
 
     let formatLsMessage = "Operation successful"
@@ -50,7 +47,7 @@ module Domain =
 
     let private tryAddUrl db url =
         parseUrl url
-        |> Option.map (fun _ -> Map.add (Url url) (Version "?") db)
+        |> Option.map (fun _ -> (Url url) :: db)
         |> Option.defaultValue db
 
     let handleMsg state (_, msg) =
@@ -119,46 +116,42 @@ module Database =
     open LiteDB
 
     [<CLIMutable>]
-    type 't Item = { id: string; value: 't }
+    type 't Item = { id: string }
 
-    type t<'key, 't when 'key: comparison> =
+    type t<'t when 't: comparison> =
         { db: LiteDatabase
           collection: ILiteCollection<'t Item>
-          keyConvert: 'key -> string
-          backKeyConvert: string -> 'key
-          state: Map<'key, 't> ref }
+          keyConvert: 't -> string
+          backKeyConvert: string -> 't }
 
     let private readAllFromDbInner backKeyConvert (collection: _ ILiteCollection) =
         collection.FindAll()
-        |> Seq.map (fun x -> backKeyConvert x.id, x.value)
-        |> Map.ofSeq
+        |> Seq.map (fun x -> backKeyConvert x.id)
+        |> Seq.toList
 
-    let mkDatabase (collectionName: string) keyConvert backKeyConvert =
+    let make (collectionName: string) keyConvert backKeyConvert =
         let db = new LiteDatabase(new IO.MemoryStream())
         let col = db.GetCollection<_ Item>(collectionName)
         { db = db
           collection = col
           keyConvert = keyConvert
-          backKeyConvert = backKeyConvert
-          state = ref <| readAllFromDbInner backKeyConvert col }
+          backKeyConvert = backKeyConvert }
 
-    let saveAll t newState =
+    let saveAll t (newState: _ list) =
         async {
-            let currentState = !t.state
-            currentState
-            |> Map.filter (fun k _ -> not <| Map.containsKey k newState)
-            |> Map.iter (fun k _ ->
-                t.collection.Delete(BsonValue.op_Implicit (t.keyConvert k))
-                |> ignore)
+            t.db.BeginTrans() |> ignore
+
+            t.collection.DeleteAll() |> ignore
+
             newState
-            |> Map.filter (fun k v -> Map.tryFind k currentState <> Some v)
-            |> Map.iter (fun k v ->
-                t.collection.Upsert({ id = t.keyConvert k; value = v })
-                |> ignore)
-            t.state := newState
+            |> List.map (fun x -> { id = t.keyConvert x })
+            |> t.collection.Insert
+            |> ignore
+
+            t.db.Commit() |> ignore
         }
 
-    let readAllFromDb t =
+    let readAllFromDb t: _ list Async =
         async { return readAllFromDbInner t.backKeyConvert t.collection }
 
 module BotService =
@@ -194,9 +187,9 @@ module SyncService =
 
     let run nugetGetLastVersion githubGetAllReleases pushToNuget db =
         async {
-            let! (items: Map<Url, Version>) = Database.readAllFromDb db
+            let! (items: Url list) = Database.readAllFromDb db
 
-            for (url, _) in items |> Map.toList do
+            for url in items do
                 let! githubInfo = getGithubVersion githubGetAllReleases url
                 let! currentVersion = getVersionOnNuget nugetGetLastVersion url
 
@@ -322,8 +315,8 @@ module Telegram =
 
 [<EntryPoint>]
 let main argv =
-    let db =
-        Database.mkDatabase "main" (fun (Url x) -> x) Url
+    let db: Database.t<Url> =
+        Database.make "main" (fun (Url x) -> x) Url
 
     let mygetToken = argv.[0]
     let telegramToken = argv.[1]

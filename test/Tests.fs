@@ -9,7 +9,7 @@ open Swensen.Unquote
 let ``no empty message for ls result`` () =
     async {
         let db =
-            Database.mkDatabase "main" (fun (Url x) -> x) Url
+            Database.make "main" (fun (Url x) -> x) Url
 
         let mutable log = []
         let mutable writeToBot = fun _ -> failwith "writeToBot not set"
@@ -32,7 +32,7 @@ let ``no empty message for ls result`` () =
 let ``test bot commands ls`` () =
     async {
         let db =
-            Database.mkDatabase "main" (fun (Url x) -> x) Url
+            Database.make "main" (fun (Url x) -> x) Url
 
         let mutable log = []
         let mutable writeToBot = fun _ -> failwith "writeToBot not set"
@@ -56,7 +56,7 @@ let ``test bot commands ls`` () =
 let ``test bot commands add`` () =
     async {
         let db =
-            Database.mkDatabase "main" (fun (Url x) -> x) Url
+            Database.make "main" (fun (Url x) -> x) Url
 
         let mutable log = []
         let mutable writeToBot = fun _ -> failwith "writeToBot not set"
@@ -76,7 +76,7 @@ let ``test bot commands add`` () =
 let ``e2e test`` () =
     async {
         let db =
-            Database.mkDatabase "main" (fun (Url x) -> x) Url
+            Database.make "main" (fun (Url x) -> x) Url
 
         let mutable log = []
         let mutable writeToBot = fun _ -> failwith "writeToBot not set"
@@ -118,7 +118,7 @@ let ``e2e test`` () =
 let ``e2e test 2`` () =
     async {
         let db =
-            Database.mkDatabase "main" (fun (Url x) -> x) Url
+            Database.make "main" (fun (Url x) -> x) Url
 
         let mutable log = []
         let mutable writeToBot = fun _ -> failwith "writeToBot not set"
