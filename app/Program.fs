@@ -3,14 +3,21 @@ module App
 open System
 
 type 't Updater =
-    abstract dispatch: ((('t list -> 't list * 'r))) -> 'r Async
+    abstract dispatch: ('t -> 't * 'r) -> 'r Async
 
 [<Struct>]
 type Url = Url of string
 
+type State = { items: Map<string, Url Set> }
+
+type StateUpdater = State Updater
+
 module MessageGenerator =
-    let formatMessage urls =
-        urls
+    let formatMessage user state =
+        state.items
+        |> Map.tryFind user
+        |> Option.defaultValue Set.empty
+        |> Set.toList
         |> List.map (fun (Url url) -> url)
         |> List.fold (fun a x -> a + "\n- " + x) ""
         |> fun x -> sprintf "Your subscriptions:\n%s" <| x.Trim '\n'
@@ -48,15 +55,19 @@ module Domain =
         parseUrl githubUrl
         |> Option.map (fun x -> sprintf "%s.%s" x.user x.repo)
 
-    let private tryAddUrl db url =
+    let private tryAddUrl user (state : State) url : State =
         parseUrl url
-        |> Option.map (fun _ -> (Url url) :: db)
-        |> Option.defaultValue db
+        |> Option.map (fun _ -> Url url)
+        |> Option.map (fun url ->
+            let urls = state.items |> Map.tryFind user |> Option.defaultValue Set.empty
+            let urls = Set.add url urls
+            { state with items = Map.add user urls state.items })
+        |> Option.defaultValue state
 
-    let handleMsg (_, msg) state =
+    let handleMsg (user, msg) (state : State) : State * string =
         match ParseMsg.parseMessage msg with
-        | ParseMsg.Add url -> tryAddUrl state url, MessageGenerator.formatLsMessage
-        | ParseMsg.Ls -> state, state |> MessageGenerator.formatMessage
+        | ParseMsg.Add url -> tryAddUrl user state url, MessageGenerator.formatLsMessage
+        | ParseMsg.Ls -> state, state |> (MessageGenerator.formatMessage user)
         | ParseMsg.Start ->
             state, sprintf "Commands:\n/ls - list of packages\n/add <github url to (f|c)proj> - add package"
         | ParseMsg.Unknown -> state, sprintf "Unknown command: %s" msg
@@ -116,7 +127,7 @@ module DotnetBuild =
         }
 
 module BotService =
-    let start listenTelegram writeTelegram (db: Url Updater) =
+    let start listenTelegram writeTelegram (db: StateUpdater) =
         listenTelegram (fun msg ->
             async {
                 let! outMsg = db.dispatch (Domain.handleMsg msg)
@@ -144,9 +155,14 @@ module SyncService =
             return rs |> Seq.tryHead
         }
 
-    let run nugetGetLastVersion githubGetAllReleases pushToNuget (db: _ Updater) =
+    let private getAllUrl items =
+        items
+        |> Map.toList
+        |> List.collect (fun (_, urls) -> urls |> Set.toList)
+
+    let run nugetGetLastVersion githubGetAllReleases pushToNuget (db: StateUpdater) =
         async {
-            let! (items: Url list) = db.dispatch (fun db -> db, db)
+            let! (items: Url list) = db.dispatch (fun db -> db, getAllUrl db.items)
 
             for url in items do
                 let! githubInfo = getGithubVersion githubGetAllReleases url
@@ -264,10 +280,10 @@ module Telegram =
                 printfn "Updates.size = %O, offset = %O" (Seq.length upds) !offset
 
                 for u in upds do
-                    do! listener (u.Message.From.Id, u.Message.Text)
+                    do! listener (string u.Message.From.Id, u.Message.Text)
         }
 
-    let writeTelegram t (user: int) message: _ Async =
+    let writeTelegram t (user: string) message: _ Async =
         t.client.SendTextMessageAsync(ChatId.op_Implicit user, message)
         |> Async.AwaitTask
         |> Async.Ignore
@@ -315,13 +331,16 @@ module Database =
               keyConvert = keyConvert
               backKeyConvert = backKeyConvert }
 
-        { new Updater<Url> with
-            member _.dispatch f = dispatch db f }
+        { new StateUpdater with
+            member _.dispatch f =
+                // dispatch db f
+                failwith "???" }
 
 [<EntryPoint>]
 let main argv =
-    let db =
-        Database.make "main" (fun (Url x) -> x) Url
+    let db : StateUpdater =
+        // Database.make "main" (fun (Url x) -> x) Url
+        failwith "???"
 
     let mygetToken = argv.[0]
     let telegramToken = argv.[1]
