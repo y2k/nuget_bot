@@ -182,8 +182,10 @@ let main argv =
     let mkReducer db =
         Persistent.run { items = Map.empty } Domain.reduce db
 
+    IO.Directory.CreateDirectory "__data" |> ignore
+
     let db =
-        Persistent.make (new LiteDB.LiteDatabase(new IO.MemoryStream()))
+        Persistent.make (new LiteDB.LiteDatabase("__data/log.db"))
 
     let mygetToken = argv.[0]
     let telegramToken = argv.[1]

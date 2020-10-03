@@ -9,7 +9,7 @@ COPY . /app
 RUN dotnet test
 RUN dotnet publish -c Release -r linux-x64 --self-contained false
 
-# sdk нужен что бы собирать проекты внутри
+# sdk нужен что бы собирать проекты внутри контейнера
 FROM mcr.microsoft.com/dotnet/sdk:5.0.100-rc.1-alpine3.12
 
 WORKDIR /app
