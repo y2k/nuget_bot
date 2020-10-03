@@ -9,7 +9,7 @@ open Services
 let private runTest f =
     async {
         let mkReducer db =
-            Persistent.run { items = Map.empty } Domain.reduce db
+            Persistent.mkReducer MsgSerializer.info { items = Map.empty } Domain.reduce db
 
         let db =
             Persistent.make (new LiteDB.LiteDatabase(new IO.MemoryStream()))

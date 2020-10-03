@@ -10,9 +10,40 @@ type Msg =
     | UrlAdded of user: User * url: Url
     | UrlRemoved of user: User * url: Url
 
+module MsgSerializer =
+    [<CLIMutable>]
+    type t =
+        { id: int
+          tag: int
+          user: string
+          url: string }
+
+    let getId x = x.id
+
+    let serialize =
+        function
+        | UrlAdded ((User user), (Url url)) ->
+            { id = 0
+              tag = 1
+              user = user
+              url = url }
+        | UrlRemoved ((User user), (Url url)) ->
+            { id = 0
+              tag = 2
+              user = user
+              url = url }
+
+    let deserialize =
+        function
+        | { tag = 1; user = user; url = url } -> UrlAdded(User user, Url url)
+        | { tag = 2; user = user; url = url } -> UrlRemoved(User user, Url url)
+        | value -> failwithf "Can't parse %O" value
+
+    let info = getId, serialize, deserialize
+
 module MessageGenerator =
-    let formatMessage user state =
-        state.items
+    let formatMessage user items =
+        items
         |> Map.tryFind user
         |> Option.defaultValue Set.empty
         |> Set.toList
@@ -38,6 +69,14 @@ module ParseMsg =
 
 module Domain =
     open System.Text.RegularExpressions
+
+    let updateProj user repo version xml =
+        let replace s (r: string) xml = Regex.Replace(xml, s, r)
+        xml
+        |> replace "<PackageId>.+?</PackageId>" ""
+        |> replace "(<PropertyGroup>)" (sprintf "$1<PackageId>%s.%s</PackageId>" user repo)
+        |> replace "<Version>.+?</Version>" ""
+        |> replace "(<PropertyGroup>)" (sprintf "$1<Version>%s</Version>" version)
 
     let getAllUrl items =
         items
@@ -85,16 +124,14 @@ module Domain =
     let handleMsg (user, msg) (state: State): Msg list * string =
         match ParseMsg.parseMessage msg with
         | ParseMsg.Add url -> tryAddUrl user state (Url url), MessageGenerator.formatLsMessage
-        | ParseMsg.Ls -> [], state |> (MessageGenerator.formatMessage user)
+        | ParseMsg.Ls -> [], MessageGenerator.formatMessage user state.items
         | ParseMsg.Start ->
             [], sprintf "Commands:\n/ls - list of packages\n/add <github url to (f|c)proj> - add package"
         | ParseMsg.Unknown -> [], sprintf "Unknown command: %s" msg
 
 module DotnetBuild =
-    open System.Text.RegularExpressions
     open System.Net
     open System.IO
-    open System.IO.Compression
 
     let buildNugetFromGithub (version, zipUrl: Uri) url =
         async {
@@ -110,22 +147,15 @@ module DotnetBuild =
 
             let zipDir = Path.GetTempFileName() + "_dir"
 
-            ZipFile.ExtractToDirectory(zipPath, zipDir)
+            Compression.ZipFile.ExtractToDirectory(zipPath, zipDir)
 
             let slnDir = Directory.GetDirectories(zipDir).[0]
 
             let fp = Path.Combine(slnDir, info.proj)
 
-            let xml =
-                IO.File.ReadAllText(fp)
-                |> fun xml -> Regex.Replace(xml, "<PackageId>.+?</PackageId>", "")
-                |> fun xml ->
-                    Regex.Replace
-                        (xml, "(<PropertyGroup>)", sprintf "$1<PackageId>%s.%s</PackageId>" info.user info.repo)
-                |> fun xml -> Regex.Replace(xml, "<Version>.+?</Version>", "")
-                |> fun xml -> Regex.Replace(xml, "(<PropertyGroup>)", sprintf "$1<Version>%O</Version>" version)
-
-            File.WriteAllText(fp, xml)
+            IO.File.ReadAllText(fp)
+            |> Domain.updateProj info.user info.repo version
+            |> fun xml -> File.WriteAllText(fp, xml)
 
             let projDir =
                 Path.Combine(slnDir, Path.GetDirectoryName(info.proj))

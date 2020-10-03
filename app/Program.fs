@@ -4,56 +4,33 @@ open System
 open Services
 
 module Persistent =
-    module DbAction =
-        [<CLIMutable>]
-        type t =
-            { id: int
-              tag: int
-              user: string
-              url: string }
-
-        let serialize =
-            function
-            | UrlAdded ((User user), (Url url)) ->
-                { id = 0
-                  tag = 1
-                  user = user
-                  url = url }
-            | UrlRemoved ((User user), (Url url)) ->
-                { id = 0
-                  tag = 2
-                  user = user
-                  url = url }
-
-        let deserialize =
-            function
-            | { tag = 1; user = user; url = url } -> UrlAdded(User user, Url url)
-            | { tag = 2; user = user; url = url } -> UrlRemoved(User user, Url url)
-            | value -> failwithf "Can't parse %O" value
-
     open LiteDB
 
-    type t =
-        { col: DbAction.t ILiteCollection
+    type 'at t =
+        { col: 'at ILiteCollection
           db: LiteDatabase }
 
     let make (db: LiteDatabase) =
-        let col = db.GetCollection<DbAction.t>("log")
+        let col = db.GetCollection<'at>("log")
         { col = col; db = db }
 
-    let run (init: 's) (f: 's -> Msg -> 's) (t: t) =
-        let db = t.db
-        let col = t.col
+    let mkReducer ((getId: 'at -> int), (serialize: 'msg -> 'at), (deserialize: 'at -> 'msg))
+                  (init: 's)
+                  (f: 's -> 'msg -> 's)
+                  (t: 'at t)
+                  =
         let index = ref 0
         let state = ref init
-        fun (fxs: _ -> Msg list) ->
+        fun (fxs: _ -> 'msg list) ->
             async {
-                db.BeginTrans() |> ignore
+                t.db.BeginTrans() |> ignore
 
-                let prevs = col.Find(fun x -> x.id > !index)
+                let prevs =
+                    t.col.Find(Query.GT("_id", BsonValue.op_Implicit !index))
+
                 for a in prevs do
-                    let x = DbAction.deserialize a
-                    index := a.id
+                    let x = deserialize a
+                    index := getId a
                     state := f !state x
 
                 let result = !state
@@ -61,11 +38,11 @@ module Persistent =
                 let xs = fxs !state
                 for x in xs do
                     state := f !state x
-                    let a = DbAction.serialize x
-                    col.Insert a |> ignore
-                    index := a.id
+                    let a = serialize x
+                    t.col.Insert a |> ignore
+                    index := getId a
 
-                db.Commit() |> ignore
+                t.db.Commit() |> ignore
 
                 return result
             }
@@ -180,7 +157,7 @@ module Telegram =
 [<EntryPoint>]
 let main argv =
     let mkReducer db =
-        Persistent.run { items = Map.empty } Domain.reduce db
+        Persistent.mkReducer MsgSerializer.info { items = Map.empty } Domain.reduce db
 
     IO.Directory.CreateDirectory "__data" |> ignore
 
