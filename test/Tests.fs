@@ -2,143 +2,112 @@ module Tests
 
 open System
 open Xunit
-open App
 open Swensen.Unquote
+open App
+open Services
+
+let private runTest f =
+    async {
+        let mkReducer db =
+            Persistent.run { items = Map.empty } Domain.reduce db
+
+        let db =
+            Persistent.make (new LiteDB.LiteDatabase(new IO.MemoryStream()))
+
+        let log = ref []
+        let mutable writeToBot = fun _ -> failwith "writeToBot not set"
+
+        do! BotService.start (mkReducer db) (fun f ->
+                writeToBot <- f
+                async.Zero()) (fun _ msg ->
+                log := msg :: !log
+                async.Zero())
+
+        log := []
+        do! f writeToBot log (mkReducer db)
+    }
+    |> Async.RunSynchronously
+
+let private userA = User "0"
 
 [<Fact>]
 let ``no empty message for ls result`` () =
-    async {
-        let db =
-            Database.make "main" (fun (Url x) -> x) Url
-
-        let mutable log = []
-        let mutable writeToBot = fun _ -> failwith "writeToBot not set"
-
-        do! BotService.start (fun f ->
-                writeToBot <- f
-                async.Zero()) (fun _ msg ->
-                log <- msg :: log
-                async.Zero()) db
-
-        log <- []
-        do! writeToBot (0, "/ls")
-
-        Assert.Equal(1, List.length log)
-        Assert.All(log, (fun x -> Assert.False(String.IsNullOrWhiteSpace x, sprintf "'%s' is empty" x)))
-    }
-    |> Async.RunSynchronously
+    runTest
+    <| fun writeToBot log _ ->
+        async {
+            do! writeToBot (User "0", "/ls")
+            Assert.Equal(1, List.length !log)
+            Assert.All(!log, (fun x -> Assert.False(String.IsNullOrWhiteSpace x, sprintf "'%s' is empty" x)))
+        }
 
 [<Fact>]
 let ``test bot commands ls`` () =
-    async {
-        let db =
-            Database.make "main" (fun (Url x) -> x) Url
+    runTest
+    <| fun writeToBot log _ ->
+        async {
+            do! writeToBot (userA, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
 
-        let mutable log = []
-        let mutable writeToBot = fun _ -> failwith "writeToBot not set"
-
-        do! BotService.start (fun f ->
-                writeToBot <- f
-                async.Zero()) (fun _ msg ->
-                log <- msg :: log
-                async.Zero()) db
-
-        do! writeToBot (0, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
-
-        log <- []
-        do! writeToBot (0, "/ls")
-        Assert.Equal
-            (box [ "Your subscriptions:\n- https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj" ], log)
-    }
-    |> Async.RunSynchronously
+            log := []
+            do! writeToBot (userA, "/ls")
+            Assert.Equal
+                (box [ "Your subscriptions:\n- https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj" ], !log)
+        }
 
 [<Fact>]
 let ``test bot commands add`` () =
-    async {
-        let db =
-            Database.make "main" (fun (Url x) -> x) Url
-
-        let mutable log = []
-        let mutable writeToBot = fun _ -> failwith "writeToBot not set"
-
-        do! BotService.start (fun f ->
-                writeToBot <- f
-                async.Zero()) (fun _ msg ->
-                log <- msg :: log
-                async.Zero()) db
-
-        do! writeToBot (0, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
-        Assert.Equal(box [ "Operation successful" ], log)
-    }
-    |> Async.RunSynchronously
+    runTest
+    <| fun writeToBot log _ ->
+        async {
+            do! writeToBot (userA, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
+            Assert.Equal(box [ "Operation successful" ], !log)
+        }
 
 [<Fact>]
 let ``e2e test`` () =
-    async {
-        let db =
-            Database.make "main" (fun (Url x) -> x) Url
+    runTest
+    <| fun writeToBot log reducer ->
+        async {
+            do! writeToBot (userA, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
+            Assert.Equal(box [ "Operation successful" ], !log)
 
-        let mutable log = []
-        let mutable writeToBot = fun _ -> failwith "writeToBot not set"
+            let getAllReleases _ _ =
+                [ "0.0.2", Uri "https://api.github.com/repos/y2k/nuget-test/zipball/0.0.2" ]
+                |> Seq.ofList
+                |> async.Return
 
-        do! BotService.start (fun f ->
-                writeToBot <- f
-                async.Zero()) (fun _ msg ->
-                log <- msg :: log
-                async.Zero()) db
+            let nugetGetLastVersion _ = "0.0.1" |> Some |> async.Return
 
-        do! writeToBot (0, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
-        Assert.Equal(box [ "Operation successful" ], log)
+            let pushToNugetChannel =
+                Threading.Channels.Channel.CreateBounded<string>(1)
 
-        let getAllReleases _ _ =
-            [ "0.0.2", Uri "https://api.github.com/repos/y2k/nuget-test/zipball/0.0.2" ]
-            |> Seq.ofList
-            |> async.Return
+            let pushToNuget path =
+                (pushToNugetChannel.Writer.WriteAsync path).AsTask()
+                |> Async.AwaitTask
 
-        let nugetGetLastVersion _ = "0.0.1" |> Some |> async.Return
+            do! SyncService.run reducer nugetGetLastVersion getAllReleases pushToNuget
 
-        let pushToNugetChannel =
-            Threading.Channels.Channel.CreateBounded<string>(1)
+            let! path =
+                pushToNugetChannel.Reader.ReadAsync().AsTask()
+                |> Async.AwaitTask
 
-        let pushToNuget path =
-            (pushToNugetChannel.Writer.WriteAsync path).AsTask()
-            |> Async.AwaitTask
-
-        do! SyncService.run nugetGetLastVersion getAllReleases pushToNuget db
-
-        let! path =
-            pushToNugetChannel.Reader.ReadAsync().AsTask()
-            |> Async.AwaitTask
-
-        test <@ path.EndsWith "/bin/Release/y2k.nuget-test.0.0.2.nupkg" @>
-    }
-    |> Async.RunSynchronously
+            test <@ path.EndsWith "/bin/Release/y2k.nuget-test.0.0.2.nupkg" @>
+        }
 
 [<Fact>]
-let ``e2e test 2`` () =
-    async {
-        let db =
-            Database.make "main" (fun (Url x) -> x) Url
+let ``save version must not be uploaded twice`` () =
+    runTest
+    <| fun writeToBot log reducer ->
+        async {
+            do! writeToBot (userA, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
+            Assert.Equal(box [ "Operation successful" ], !log)
 
-        let mutable log = []
-        let mutable writeToBot = fun _ -> failwith "writeToBot not set"
+            let getAllReleases _ _ =
+                [ "0.0.1", Uri "https://g.com/" ]
+                |> Seq.ofList
+                |> async.Return
 
-        do! BotService.start (fun f ->
-                writeToBot <- f
-                async.Zero()) (fun _ msg ->
-                log <- msg :: log
-                async.Zero()) db
+            let nugetGetLastVersion _ = "0.0.1" |> Some |> async.Return
 
-        do! writeToBot (0, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
-        Assert.Equal(box [ "Operation successful" ], log)
-
-        let getAllReleases _ _ =
-            [ "0.0.1", Uri "https://g.com/" ]
-            |> Seq.ofList
-            |> async.Return
-
-        let nugetGetLastVersion _ = "0.0.1" |> Some |> async.Return
-
-        do! SyncService.run nugetGetLastVersion getAllReleases (fun _ -> failwith "'pushToNuget' must not be called") db
-    }
-    |> Async.RunSynchronously
+            do! SyncService.run reducer nugetGetLastVersion getAllReleases (fun _ ->
+                    failwith "'pushToNuget' must not be called")
+        }
