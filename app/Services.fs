@@ -42,6 +42,9 @@ module MsgSerializer =
     let info = getId, serialize, deserialize
 
 module MessageGenerator =
+    let startMessage =
+        "Commands (ver 0.1):\n/ls - list of packages\n/add <github url to (f|c)proj> - add package"
+
     let formatMessage user items =
         items
         |> Map.tryFind user
@@ -125,8 +128,7 @@ module Domain =
         match ParseMsg.parseMessage msg with
         | ParseMsg.Add url -> tryAddUrl user state (Url url), MessageGenerator.formatLsMessage
         | ParseMsg.Ls -> [], MessageGenerator.formatMessage user state.items
-        | ParseMsg.Start ->
-            [], sprintf "Commands:\n/ls - list of packages\n/add <github url to (f|c)proj> - add package"
+        | ParseMsg.Start -> [], MessageGenerator.startMessage
         | ParseMsg.Unknown -> [], sprintf "Unknown command: %s" msg
 
 module DotnetBuild =

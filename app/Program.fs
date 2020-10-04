@@ -134,7 +134,7 @@ module Telegram =
             do! clearHistory offset t.client
             while true do
                 let! upds =
-                    t.client.GetUpdatesAsync(offset = !offset, timeout = 60)
+                    t.client.GetUpdatesAsync(offset = !offset, timeout = 15 * 60)
                     |> Async.AwaitTask
 
                 offset
