@@ -55,9 +55,7 @@ module Github =
             let github =
                 GitHubClient(ProductHeaderValue("nuget-bot"), Credentials = Credentials token)
 
-            let! releases =
-                github.Repository.Release.GetAll(user, repo)
-                |> Async.AwaitTask
+            let! releases = github.Repository.Release.GetAll(user, repo)
 
             return releases
                    |> Seq.map (fun rs -> rs.TagName, Uri rs.ZipballUrl)
@@ -115,9 +113,7 @@ module Telegram =
         async {
             let stop = ref false
             while not !stop do
-                let! upds =
-                    client.GetUpdatesAsync(offset = !offset, timeout = 0)
-                    |> Async.AwaitTask
+                let! upds = client.GetUpdatesAsync(offset = !offset, timeout = 0)
 
                 offset
                 := upds
@@ -133,9 +129,7 @@ module Telegram =
             let offset = ref 0
             do! clearHistory offset t.client
             while true do
-                let! upds =
-                    t.client.GetUpdatesAsync(offset = !offset, timeout = 15 * 60)
-                    |> Async.AwaitTask
+                let! upds = t.client.GetUpdatesAsync(offset = !offset, timeout = 15 * 60)
 
                 offset
                 := upds
