@@ -78,13 +78,13 @@ module Nuget =
             let! response =
                 client.DownloadStringTaskAsync url
                 |> Async.AwaitTask
-                |> Async.Catch
+                |> Async.catch
 
             let json =
                 match response with
-                | Choice1Of2 x -> Some x
-                | Choice2Of2 e when e.Message.Contains "404" -> None
-                | Choice2Of2 e -> raise e
+                | Ok x -> Some x
+                | Error e when e.Message.Contains "404" -> None
+                | Error e -> raise e
 
             return json
                    |> Option.map (fun json ->
