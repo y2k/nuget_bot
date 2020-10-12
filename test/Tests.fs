@@ -105,9 +105,7 @@ let ``e2e test`` () =
 
             do! SyncService.run reducer nugetGetLastVersion getAllReleases pushToNuget
 
-            let! path =
-                pushToNugetChannel.Reader.ReadAsync().AsTask()
-                |> Async.AwaitTask
+            let! path = pushToNugetChannel.Reader.ReadAsync()
 
             test <@ path.EndsWith "/bin/Release/y2k.nuget-test.0.0.2.nupkg" @>
         }
