@@ -66,7 +66,10 @@ module Nuget =
     open System.Text.Json
 
     [<CLIMutable>]
-    type NugetResponse = { items: {| upper: string |} [] }
+    type NugetResponseItem = { upper: string }
+
+    [<CLIMutable>]
+    type NugetResponse = { items: NugetResponseItem [] }
 
     let getLastVersion (id: string) =
         async {
