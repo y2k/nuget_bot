@@ -1,5 +1,18 @@
 module Services
 
+module Async =
+    let rec retry count (timeMs : int) a =
+        async {
+            match! Async.Catch a with
+            | Choice1Of2 x -> return x
+            | Choice2Of2 e ->
+                if count <= 0 then return raise e
+                else
+                    printfn "RETRY (count = %i): %O" count e
+                    do! Async.Sleep timeMs
+                    return! retry (count - 1) (2 * timeMs) a
+        }
+
 open System
 
 type User = User of string

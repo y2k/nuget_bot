@@ -71,6 +71,19 @@ module Nuget =
     [<CLIMutable>]
     type NugetResponse = { items: NugetResponseItem [] }
 
+    let private downloadJson (client: WebClient) (url: string) =
+        async {
+            let! response =
+                client.DownloadStringTaskAsync url
+                |> Async.AwaitTask
+                |> Async.catch
+
+            return match response with
+                   | Ok x -> Some x
+                   | Error e when e.Message.Contains "404" -> None
+                   | Error e -> raise e
+        }
+
     let getLastVersion (id: string) =
         async {
             let client = new WebClient()
@@ -79,16 +92,7 @@ module Nuget =
             let url =
                 sprintf "https://www.myget.org/F/y2k/api/v3/registration1/%s/index.json" (id.ToLowerInvariant())
 
-            let! response =
-                client.DownloadStringTaskAsync url
-                |> Async.AwaitTask
-                |> Async.catch
-
-            let json =
-                match response with
-                | Ok x -> Some x
-                | Error e when e.Message.Contains "404" -> None
-                | Error e -> raise e
+            let! json = downloadJson client url |> Async.retry 5 2_000
 
             return json
                    |> Option.map (fun json ->
