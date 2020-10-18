@@ -73,10 +73,7 @@ module Nuget =
 
     let private downloadJson (client: WebClient) (url: string) =
         async {
-            let! response =
-                client.DownloadStringTaskAsync url
-                |> Async.AwaitTask
-                |> Async.catch
+            let! response = client.AsyncDownloadString(Uri url) |> Async.catch
 
             return match response with
                    | Ok x -> Some x
