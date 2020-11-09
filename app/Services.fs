@@ -1,12 +1,13 @@
 module Services
 
 module Async =
-    let rec retry count (timeMs : int) a =
+    let rec retry count (timeMs: int) a =
         async {
             match! Async.Catch a with
             | Choice1Of2 x -> return x
             | Choice2Of2 e ->
-                if count <= 0 then return raise e
+                if count <= 0 then
+                    return raise e
                 else
                     printfn "RETRY (count = %i): %O" count e
                     do! Async.Sleep timeMs
@@ -22,37 +23,6 @@ type State = { items: Map<User, Url Set> }
 type Msg =
     | UrlAdded of user: User * url: Url
     | UrlRemoved of user: User * url: Url
-
-module MsgSerializer =
-    [<CLIMutable>]
-    type t =
-        { id: int
-          tag: int
-          user: string
-          url: string }
-
-    let getId x = x.id
-
-    let serialize =
-        function
-        | UrlAdded ((User user), (Url url)) ->
-            { id = 0
-              tag = 1
-              user = user
-              url = url }
-        | UrlRemoved ((User user), (Url url)) ->
-            { id = 0
-              tag = 2
-              user = user
-              url = url }
-
-    let deserialize =
-        function
-        | { tag = 1; user = user; url = url } -> UrlAdded(User user, Url url)
-        | { tag = 2; user = user; url = url } -> UrlRemoved(User user, Url url)
-        | value -> failwithf "Can't parse %O" value
-
-    let info = getId, serialize, deserialize
 
 module MessageGenerator =
     let startMessage =

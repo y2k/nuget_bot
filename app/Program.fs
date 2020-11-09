@@ -5,19 +5,31 @@ open Services
 
 module Persistent =
     open LiteDB
+    open System.Text.Json
+    open System.Text.Json.Serialization
+
+    let options = JsonSerializerOptions()
+    options.Converters.Add(JsonFSharpConverter())
+
+    [<CLIMutable>]
+    type Wrapper =
+        { id: int
+          value: string }
 
     type 'at t =
-        { col: 'at ILiteCollection
+        { col: Wrapper ILiteCollection
           db: LiteDatabase }
 
     let make (db: LiteDatabase) =
-        let col = db.GetCollection<'at>("log")
+        let col = db.GetCollection<Wrapper>("log")
         { col = col; db = db }
 
-    let mkReducer ((getId: 'at -> int), (serialize: 'msg -> 'at), (deserialize: 'at -> 'msg))
-                  (init: 's)
+    let private serialize x = JsonSerializer.Serialize(x, options)
+    let private deserialize (s: string) = JsonSerializer.Deserialize(s, options)
+
+    let mkReducer (init: 's)
                   (f: 's -> 'msg -> 's)
-                  (t: 'at t)
+                  (t: 'msg t)
                   =
         let index = ref 0
         let state = ref init
@@ -28,9 +40,10 @@ module Persistent =
                 let prevs =
                     t.col.Find(Query.GT("_id", BsonValue.op_Implicit !index))
 
-                for a in prevs do
+                for aw in prevs do
+                    let a = aw.value
                     let x = deserialize a
-                    index := getId a
+                    index := aw.id
                     state := f !state x
 
                 let result = !state
@@ -39,8 +52,9 @@ module Persistent =
                 for x in xs do
                     state := f !state x
                     let a = serialize x
-                    t.col.Insert a |> ignore
-                    index := getId a
+                    let aw = { id = 0; value = a }
+                    t.col.Insert aw |> ignore
+                    index := aw.id
 
                 t.db.Commit() |> ignore
 
@@ -156,12 +170,12 @@ module Telegram =
 [<EntryPoint>]
 let main argv =
     let mkReducer db =
-        Persistent.mkReducer MsgSerializer.info { items = Map.empty } Domain.reduce db
+        Persistent.mkReducer { items = Map.empty } Domain.reduce db
 
     IO.Directory.CreateDirectory "__data" |> ignore
 
-    let db =
-        Persistent.make (new LiteDB.LiteDatabase("__data/log.db"))
+    let db : Msg Persistent.t =
+        Persistent.make (new LiteDB.LiteDatabase("__data/log2.db"))
 
     let mygetToken = argv.[0]
     let telegramToken = argv.[1]
