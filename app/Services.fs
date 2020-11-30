@@ -58,6 +58,7 @@ module Domain =
 
     let updateProj user repo version xml =
         let replace s (r: string) xml = Regex.Replace(xml, s, r)
+
         xml
         |> replace "<PackageId>.+?</PackageId>" ""
         |> replace "(<PropertyGroup>)" (sprintf "$1<PackageId>%s.%s</PackageId>" user repo)
@@ -89,7 +90,9 @@ module Domain =
                   items = Map.add user urls state.items }
 
     let parseUrl (Url url) =
-        match Regex.Match(url, "github\\.com/(.+?)/(.+?)/blob/master/(.+\\.fsproj)$").Groups
+        match Regex
+                  .Match(url, "github\\.com/(.+?)/(.+?)/blob/master/(.+\\.fsproj)$")
+                  .Groups
               |> Seq.toList with
         | [ _; a; b; c ] ->
             Some
@@ -151,22 +154,24 @@ module DotnetBuild =
 
             Diagnostics.Process.Start(pi).WaitForExit()
 
-            return Path.Combine
-                       (slnDir,
-                        Path.GetDirectoryName(info.proj),
-                        sprintf "bin/Release/%s.%s.%s.nupkg" info.user info.repo version)
+            return
+                Path.Combine
+                    (slnDir,
+                     Path.GetDirectoryName(info.proj),
+                     sprintf "bin/Release/%s.%s.%s.nupkg" info.user info.repo version)
         }
 
 module BotService =
     let start (reducer: (State -> Msg list) -> State Async) listenTelegram writeTelegram =
-        listenTelegram (fun msg ->
-            async {
-                let f1 state = fst <| Domain.handleMsg msg state
-                let f2 state = snd <| Domain.handleMsg msg state
-                let! state' = reducer f1
-                let outMsg = f2 state'
-                do! writeTelegram (fst msg) outMsg
-            })
+        listenTelegram
+            (fun msg ->
+                async {
+                    let f1 state = fst <| Domain.handleMsg msg state
+                    let f2 state = snd <| Domain.handleMsg msg state
+                    let! state' = reducer f1
+                    let outMsg = f2 state'
+                    do! writeTelegram (fst msg) outMsg
+                })
 
 module SyncService =
     let private uploadNewVersion githubInfo pushToNuget url =
@@ -208,5 +213,5 @@ module SyncService =
         async {
             while true do
                 do! run reducer nugetGetLastVersion githubGetAllReleases pushToNuget
-                do! Async.Sleep 180_000
+                do! Async.Sleep(3 * 60_000)
         }

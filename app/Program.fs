@@ -12,9 +12,7 @@ module Persistent =
     options.Converters.Add(JsonFSharpConverter())
 
     [<CLIMutable>]
-    type Wrapper =
-        { id: int
-          value: string }
+    type Wrapper = { id: int; value: string }
 
     type 'at t =
         { col: Wrapper ILiteCollection
@@ -27,12 +25,10 @@ module Persistent =
     let private serialize x = JsonSerializer.Serialize(x, options)
     let private deserialize (s: string) = JsonSerializer.Deserialize(s, options)
 
-    let mkReducer (init: 's)
-                  (f: 's -> 'msg -> 's)
-                  (t: 'msg t)
-                  =
+    let mkReducer (init: 's) (f: 's -> 'msg -> 's) (t: 'msg t) =
         let index = ref 0
         let state = ref init
+
         fun (fxs: _ -> 'msg list) ->
             async {
                 t.db.BeginTrans() |> ignore
@@ -49,6 +45,7 @@ module Persistent =
                 let result = !state
 
                 let xs = fxs !state
+
                 for x in xs do
                     state := f !state x
                     let a = serialize x
@@ -71,8 +68,9 @@ module Github =
 
             let! releases = github.Repository.Release.GetAll(user, repo)
 
-            return releases
-                   |> Seq.map (fun rs -> rs.TagName, Uri rs.ZipballUrl)
+            return
+                releases
+                |> Seq.map (fun rs -> rs.TagName, Uri rs.ZipballUrl)
         }
 
 module Nuget =
@@ -89,10 +87,11 @@ module Nuget =
         async {
             let! response = client.AsyncDownloadString(Uri url) |> Async.catch
 
-            return match response with
-                   | Ok x -> Some x
-                   | Error e when e.Message.Contains "404" -> None
-                   | Error e -> raise e
+            return
+                match response with
+                | Ok x -> Some x
+                | Error e when e.Message.Contains "404" -> None
+                | Error e -> raise e
         }
 
     let getLastVersion (id: string) =
@@ -105,10 +104,12 @@ module Nuget =
 
             let! json = downloadJson client url |> Async.retry 5 2_000
 
-            return json
-                   |> Option.map (fun json ->
-                       let response: NugetResponse = JsonSerializer.Deserialize(json)
-                       response.items.[0].upper)
+            return
+                json
+                |> Option.map
+                    (fun json ->
+                        let response: NugetResponse = JsonSerializer.Deserialize(json)
+                        response.items.[0].upper)
         }
 
     let pushToNuget token packPath =
@@ -124,21 +125,22 @@ module Telegram =
     open Telegram.Bot
     open Telegram.Bot.Types
 
-    type t = { client: TelegramBotClient }
+    type t = private { client: TelegramBotClient }
 
     let mkClient token = { client = TelegramBotClient token }
 
     let private clearHistory offset (client: TelegramBotClient) =
         async {
             let stop = ref false
+
             while not !stop do
                 let! upds = client.GetUpdatesAsync(offset = !offset, timeout = 0)
 
                 offset
                 := upds
-                |> Seq.map (fun x -> x.Id + 1)
-                |> Seq.append [ !offset ]
-                |> Seq.max
+                   |> Seq.map (fun x -> x.Id + 1)
+                   |> Seq.append [ !offset ]
+                   |> Seq.max
 
                 stop := Seq.isEmpty upds
         }
@@ -147,14 +149,15 @@ module Telegram =
         async {
             let offset = ref 0
             do! clearHistory offset t.client
+
             while true do
                 let! upds = t.client.GetUpdatesAsync(offset = !offset, timeout = 15 * 60)
 
                 offset
                 := upds
-                |> Seq.map (fun x -> x.Id + 1)
-                |> Seq.append [ !offset ]
-                |> Seq.max
+                   |> Seq.map (fun x -> x.Id + 1)
+                   |> Seq.append [ !offset ]
+                   |> Seq.max
 
                 printfn "Updates.size = %O, offset = %O" (Seq.length upds) !offset
 
@@ -174,13 +177,14 @@ let main argv =
 
     IO.Directory.CreateDirectory "__data" |> ignore
 
-    let db : Msg Persistent.t =
+    let db: Msg Persistent.t =
         Persistent.make (new LiteDB.LiteDatabase("__data/log2.db"))
 
     let mygetToken = argv.[0]
     let telegramToken = argv.[1]
     let githubToken = argv.[2]
     let client = Telegram.mkClient telegramToken
+
     Async.Parallel [ SyncService.runLoop
                          (mkReducer db)
                          (Nuget.pushToNuget mygetToken)
@@ -189,4 +193,5 @@ let main argv =
                      BotService.start (mkReducer db) (Telegram.listenUpdates client) (Telegram.writeTelegram client) ]
     |> Async.RunSynchronously
     |> ignore
+
     0
