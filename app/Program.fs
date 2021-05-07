@@ -2,6 +2,7 @@ module App
 
 open System
 open Services
+open MyGetBot
 
 module Persistent =
     open LiteDB
@@ -145,7 +146,7 @@ module Telegram =
                 printfn "Updates.size = %O, offset = %O" (Seq.length upds) !offset
 
                 for u in upds do
-                    do! listener (Services.User <| string u.Message.From.Id, u.Message.Text)
+                    do! listener (MyGetBot.User <| string u.Message.From.Id, u.Message.Text)
         }
 
     let writeTelegram t (User user) message: _ Async =

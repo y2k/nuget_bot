@@ -5,6 +5,7 @@ open Xunit
 open Swensen.Unquote
 open App
 open Services
+open MyGetBot
 
 let private runTest f =
     async {
