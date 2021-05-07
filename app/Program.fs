@@ -157,7 +157,7 @@ module Telegram =
 [<EntryPoint>]
 let main argv =
     let mkReducer db =
-        Persistent.mkReducer MsgSerializer.info { items = Map.empty } Domain.reduce db
+        Persistent.mkReducer MsgSerializer.info State.Empty Domain.reduce db
 
     IO.Directory.CreateDirectory "__data" |> ignore
 

@@ -2,7 +2,9 @@ namespace MyGetBot
 
 type User = User of string
 type Url = Url of string
-type State = { items: Map<User, Url Set> }
+type State =
+    { items: Map<User, Url Set>; syncRequested : bool }
+    with static member Empty = { items = Map.empty; syncRequested = false }
 type Msg =
     | UrlAdded of user: User * url: Url
     | UrlRemoved of user: User * url: Url
@@ -12,6 +14,7 @@ module ParseMsg =
         | Start
         | Add of string
         | Ls
+        | Sync
         | Unknown
 
     let parseMessage (msg: string): t =
@@ -19,6 +22,7 @@ module ParseMsg =
         | [ "/add"; url ] -> Add url
         | [ "/ls" ] -> Ls
         | [ "/start" ] -> Start
+        | [ "/sync" ] -> Sync
         | _ -> Unknown
 
 module MessageGenerator =
@@ -92,6 +96,7 @@ module Domain =
 
     let handleMsg (user, msg) (state: State): Msg list * string =
         match ParseMsg.parseMessage msg with
+        | ParseMsg.Sync -> failwith "???"
         | ParseMsg.Add url -> tryAddUrl user state (Url url), MessageGenerator.formatLsMessage
         | ParseMsg.Ls -> [], MessageGenerator.formatMessage user state.items
         | ParseMsg.Start -> [], MessageGenerator.startMessage
