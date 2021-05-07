@@ -15,38 +15,39 @@ module Persistent =
         let col = db.GetCollection<'at>("log")
         { col = col; db = db }
 
-    let mkReducer ((getId: 'at -> int), (serialize: 'msg -> 'at), (deserialize: 'at -> 'msg))
+    let mkReducer (getId: 'at -> int, serialize: 'event -> 'at option, deserialize: 'at -> 'event)
                   (init: 's)
-                  (f: 's -> 'msg -> 's)
+                  (f: 's -> 'event -> 's)
                   (t: 'at t)
                   =
         let index = ref 0
         let state = ref init
-        fun (fxs: _ -> 'msg list) ->
-            async {
-                t.db.BeginTrans() |> ignore
+        
+        { new IReducer<'s, 'event list> with
+            member _.Invoke fxs =
+                async {
+                    t.db.BeginTrans() |> ignore
 
-                let prevs =
                     t.col.Find(Query.GT("_id", BsonValue.op_Implicit !index))
+                    |> Seq.iter (fun a ->
+                        let event = deserialize a
+                        index := getId a
+                        state := f !state event)
 
-                for a in prevs do
-                    let x = deserialize a
-                    index := getId a
-                    state := f !state x
+                    let result, events = fxs !state
 
-                let result = !state
+                    for event in events do
+                        state := f !state event
+                        serialize event
+                        |> Option.iter (fun a ->
+                             t.col.Insert a |> ignore
+                             index := getId a)
 
-                let xs = fxs !state
-                for x in xs do
-                    state := f !state x
-                    let a = serialize x
-                    t.col.Insert a |> ignore
-                    index := getId a
+                    t.db.Commit() |> ignore
 
-                t.db.Commit() |> ignore
-
-                return result
-            }
+                    return result
+                }
+        }
 
 module Github =
     open Octokit

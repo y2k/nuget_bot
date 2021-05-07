@@ -10,7 +10,7 @@ open MyGetBot
 let private runTest f =
     async {
         let mkReducer db =
-            Persistent.mkReducer MsgSerializer.info { items = Map.empty } Domain.reduce db
+            Persistent.mkReducer MsgSerializer.info State.Empty Domain.reduce db
 
         let db =
             Persistent.make (new LiteDB.LiteDatabase(new IO.MemoryStream()))
@@ -18,14 +18,19 @@ let private runTest f =
         let log = ref []
         let mutable writeToBot = fun _ -> failwith "writeToBot not set"
 
-        do! BotService.start (mkReducer db) (fun f ->
-                writeToBot <-
-                    (fun msg ->
-                        log := []
-                        f msg)
-                async.Zero()) (fun _ msg ->
-                log := msg :: !log
-                async.Zero())
+        do!
+            BotService.start
+                (mkReducer db)
+                (fun f ->
+                    writeToBot <-
+                        (fun msg ->
+                            log := []
+                            f msg)
+
+                    async.Zero())
+                (fun _ msg ->
+                    log := msg :: !log
+                    async.Zero())
 
         do! f writeToBot log (mkReducer db)
     }
@@ -43,13 +48,18 @@ let ``multi user test`` () =
             do! writeToBot (userBob, "/add https://github.com/bob/nuget-test/blob/master/nuget-test.fsproj")
 
             do! writeToBot (userBob, "/ls")
-            Assert.Equal
-                (box [ "Your subscriptions:\n- https://github.com/bob/nuget-test/blob/master/nuget-test.fsproj" ], !log)
+
+            Assert.Equal(
+                box [ "Your subscriptions:\n- https://github.com/bob/nuget-test/blob/master/nuget-test.fsproj" ],
+                !log
+            )
 
             do! writeToBot (userAlice, "/ls")
-            Assert.Equal
-                (box [ "Your subscriptions:\n- https://github.com/alice/nuget-test/blob/master/nuget-test.fsproj" ],
-                 !log)
+
+            Assert.Equal(
+                box [ "Your subscriptions:\n- https://github.com/alice/nuget-test/blob/master/nuget-test.fsproj" ],
+                !log
+            )
         }
 
 [<Fact>]
@@ -69,8 +79,11 @@ let ``test bot commands ls`` () =
         async {
             do! writeToBot (userAlice, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
             do! writeToBot (userAlice, "/ls")
-            Assert.Equal
-                (box [ "Your subscriptions:\n- https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj" ], !log)
+
+            Assert.Equal(
+                box [ "Your subscriptions:\n- https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj" ],
+                !log
+            )
         }
 
 [<Fact>]
@@ -88,7 +101,10 @@ let ``e2e test`` () =
     <| fun writeToBot log reducer ->
         async {
             do! writeToBot (userAlice, "/add https://github.com/y2k/nuget-test/blob/master/nuget-test.fsproj")
-            Assert.Equal(box [ "Operation successful" ], !log)
+            test <@ [ "Operation successful" ] = !log @>
+
+            do! writeToBot (userAlice, "/sync")
+            test <@ [ "Sync scheduled" ] = !log @>
 
             let getAllReleases _ _ =
                 [ "0.0.2", Uri "https://api.github.com/repos/y2k/nuget-test/zipball/0.0.2" ]
@@ -101,7 +117,8 @@ let ``e2e test`` () =
                 Threading.Channels.Channel.CreateBounded<string>(1)
 
             let pushToNuget path =
-                (pushToNugetChannel.Writer.WriteAsync path).AsTask()
+                (pushToNugetChannel.Writer.WriteAsync path)
+                    .AsTask()
                 |> Async.AwaitTask
 
             do! SyncService.run reducer nugetGetLastVersion getAllReleases pushToNuget
@@ -124,8 +141,15 @@ let ``save version must not be uploaded twice`` () =
                 |> Seq.ofList
                 |> async.Return
 
+            do! writeToBot (userAlice, "/sync")
+            test <@ [ "Sync scheduled" ] = !log @>
+
             let nugetGetLastVersion _ = "0.0.1" |> Some |> async.Return
 
-            do! SyncService.run reducer nugetGetLastVersion getAllReleases (fun _ ->
-                    failwith "'pushToNuget' must not be called")
+            do!
+                SyncService.run
+                    reducer
+                    nugetGetLastVersion
+                    getAllReleases
+                    (fun _ -> failwith "'pushToNuget' must not be called")
         }

@@ -6,8 +6,12 @@ type State =
     { items: Map<User, Url Set>; syncRequested : bool }
     with static member Empty = { items = Map.empty; syncRequested = false }
 type Msg =
+    | SyncRequested of bool
     | UrlAdded of user: User * url: Url
     | UrlRemoved of user: User * url: Url
+
+type IReducer<'state, 'events> =
+    abstract member Invoke : ('state -> 'r * 'events) -> 'r Async 
 
 module ParseMsg =
     type t =
@@ -58,6 +62,7 @@ module Domain =
 
     let reduce state =
         function
+        | SyncRequested r -> { state with syncRequested = r }
         | UrlAdded (user, url) ->
             let urls =
                 Map.tryFind user state.items
@@ -87,7 +92,7 @@ module Domain =
 
     let getNugetId githubUrl =
         parseUrl githubUrl
-        |> Option.map (fun x -> sprintf "%s.%s" x.user x.repo)
+        |> Option.map (fun x -> $"%s{x.user}.%s{x.repo}")
 
     let private tryAddUrl user (_: State) url: Msg list =
         parseUrl url
@@ -96,7 +101,7 @@ module Domain =
 
     let handleMsg (user, msg) (state: State): Msg list * string =
         match ParseMsg.parseMessage msg with
-        | ParseMsg.Sync -> failwith "???"
+        | ParseMsg.Sync -> [ SyncRequested true ], "Sync scheduled"
         | ParseMsg.Add url -> tryAddUrl user state (Url url), MessageGenerator.formatLsMessage
         | ParseMsg.Ls -> [], MessageGenerator.formatMessage user state.items
         | ParseMsg.Start -> [], MessageGenerator.startMessage

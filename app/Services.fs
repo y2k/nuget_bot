@@ -6,7 +6,8 @@ module Async =
             match! Async.Catch a with
             | Choice1Of2 x -> return x
             | Choice2Of2 e ->
-                if count <= 0 then return raise e
+                if count <= 0 then
+                    return raise e
                 else
                     printfn "RETRY (count = %i): %O" count e
                     do! Async.Sleep timeMs
@@ -16,42 +17,11 @@ module Async =
 open System
 open MyGetBot
 
-module MsgSerializer =
-    [<CLIMutable>]
-    type t =
-        { id: int
-          tag: int
-          user: string
-          url: string }
-
-    let getId x = x.id
-
-    let serialize =
-        function
-        | UrlAdded ((User user), (Url url)) ->
-            { id = 0
-              tag = 1
-              user = user
-              url = url }
-        | UrlRemoved ((User user), (Url url)) ->
-            { id = 0
-              tag = 2
-              user = user
-              url = url }
-
-    let deserialize =
-        function
-        | { tag = 1; user = user; url = url } -> UrlAdded(User user, Url url)
-        | { tag = 2; user = user; url = url } -> UrlRemoved(User user, Url url)
-        | value -> failwithf "Can't parse %O" value
-
-    let info = getId, serialize, deserialize
-
 module DotnetBuild =
     open System.Net
     open System.IO
 
-    let buildNugetFromGithub (version, zipUrl: Uri) url =
+    let buildNugetFromGithub (version, zipUrl : Uri) url =
         async {
             let info = Domain.parseUrl url |> Option.get
 
@@ -71,7 +41,7 @@ module DotnetBuild =
 
             let fp = Path.Combine(slnDir, info.proj)
 
-            IO.File.ReadAllText(fp)
+            File.ReadAllText(fp)
             |> Domain.updateProj info.user info.repo version
             |> fun xml -> File.WriteAllText(fp, xml)
 
@@ -79,27 +49,33 @@ module DotnetBuild =
                 Path.Combine(slnDir, Path.GetDirectoryName(info.proj))
 
             let pi =
-                Diagnostics.ProcessStartInfo
-                    (FileName = "dotnet", WorkingDirectory = projDir, Arguments = "pack -c Release")
+                Diagnostics.ProcessStartInfo(
+                    FileName = "dotnet",
+                    WorkingDirectory = projDir,
+                    Arguments = "pack -c Release"
+                )
 
             Diagnostics.Process.Start(pi).WaitForExit()
 
-            return Path.Combine
-                       (slnDir,
-                        Path.GetDirectoryName(info.proj),
-                        sprintf "bin/Release/%s.%s.%s.nupkg" info.user info.repo version)
+            return
+                Path.Combine(
+                    slnDir,
+                    Path.GetDirectoryName(info.proj),
+                    sprintf "bin/Release/%s.%s.%s.nupkg" info.user info.repo version
+                )
         }
 
 module BotService =
-    let start (reducer: (State -> Msg list) -> State Async) listenTelegram writeTelegram =
-        listenTelegram (fun msg ->
-            async {
-                let f1 state = fst <| Domain.handleMsg msg state
-                let f2 state = snd <| Domain.handleMsg msg state
-                let! state' = reducer f1
-                let outMsg = f2 state'
-                do! writeTelegram (fst msg) outMsg
-            })
+    let start (reducer : IReducer<State, Msg list>) listenTelegram writeTelegram =
+        listenTelegram
+            (fun msg ->
+                async {
+                    let f1 state = fst <| Domain.handleMsg msg state
+                    let f2 state = snd <| Domain.handleMsg msg state
+                    let! state' = reducer.Invoke (fun s -> s, f1 s)
+                    let outMsg = f2 state'
+                    do! writeTelegram (fst msg) outMsg
+                })
 
 module SyncService =
     let private uploadNewVersion githubInfo pushToNuget url =
@@ -122,17 +98,29 @@ module SyncService =
             return rs |> Seq.tryHead
         }
 
-    let run (reducer: (State -> Msg list) -> State Async) nugetGetLastVersion githubGetAllReleases pushToNuget =
+    let private isNeedSync state =
+        if state.syncRequested then
+            state.items, [ SyncRequested false ]
+        else
+            Map.empty, []
+
+    let run
+        (reducer : IReducer<State, Msg list>)
+        nugetGetLastVersion
+        githubGetAllReleases
+        pushToNuget
+        =
         async {
-            let! state = reducer (fun _ -> [])
-            let (items: Url list) = Domain.getAllUrl state.items
+            let! items = reducer.Invoke isNeedSync
+
+            let (items : Url list) = Domain.getAllUrl items
 
             for url in items do
                 let! githubInfo = getGithubVersion githubGetAllReleases url
                 let! currentVersion = getVersionOnNuget nugetGetLastVersion url
 
                 match githubInfo with
-                | Some ((version, _) as rs) when (Some <| Version version) <> currentVersion ->
+                | Some (version, _ as rs) when (Some <| Version version) <> currentVersion ->
                     do! uploadNewVersion rs pushToNuget url
                 | _ -> ()
         }
@@ -141,5 +129,5 @@ module SyncService =
         async {
             while true do
                 do! run reducer nugetGetLastVersion githubGetAllReleases pushToNuget
-                do! Async.Sleep 180_000
+                do! Async.Sleep 15_000
         }
