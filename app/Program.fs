@@ -4,51 +4,6 @@ open System
 open Services
 open MyGetBot
 
-module Persistent =
-    open LiteDB
-
-    type 'at t =
-        { col: 'at ILiteCollection
-          db: LiteDatabase }
-
-    let make (db: LiteDatabase) =
-        let col = db.GetCollection<'at>("log")
-        { col = col; db = db }
-
-    let mkReducer (getId: 'at -> int, serialize: 'event -> 'at option, deserialize: 'at -> 'event)
-                  (init: 's)
-                  (f: 's -> 'event -> 's)
-                  (t: 'at t)
-                  =
-        let index = ref 0
-        let state = ref init
-        
-        { new IReducer<'s, 'event list> with
-            member _.Invoke fxs =
-                async {
-                    t.db.BeginTrans() |> ignore
-
-                    t.col.Find(Query.GT("_id", BsonValue.op_Implicit !index))
-                    |> Seq.iter (fun a ->
-                        let event = deserialize a
-                        index := getId a
-                        state := f !state event)
-
-                    let result, events = fxs !state
-
-                    for event in events do
-                        state := f !state event
-                        serialize event
-                        |> Option.iter (fun a ->
-                             t.col.Insert a |> ignore
-                             index := getId a)
-
-                    t.db.Commit() |> ignore
-
-                    return result
-                }
-        }
-
 module Github =
     open Octokit
 
@@ -157,24 +112,21 @@ module Telegram =
 
 [<EntryPoint>]
 let main argv =
-    let mkReducer db =
-        Persistent.mkReducer MsgSerializer.info State.Empty Domain.reduce db
-
     IO.Directory.CreateDirectory "__data" |> ignore
 
-    let db =
-        Persistent.make (new LiteDB.LiteDatabase("__data/log.db"))
+    let db = new LiteDB.LiteDatabase("__data/log.db")
+    let reducer = EventStore.mkReducer MsgSerializer.info State.Empty Domain.reduce db
 
     let mygetToken = argv.[0]
     let telegramToken = argv.[1]
     let githubToken = argv.[2]
     let client = Telegram.mkClient telegramToken
     Async.Parallel [ SyncService.runLoop
-                         (mkReducer db)
+                         reducer
                          (Nuget.pushToNuget mygetToken)
                          Nuget.getLastVersion
                          (Github.getAllReleases githubToken)
-                     BotService.start (mkReducer db) (Telegram.listenUpdates client) (Telegram.writeTelegram client) ]
+                     BotService.start reducer (Telegram.listenUpdates client) (Telegram.writeTelegram client) ]
     |> Async.RunSynchronously
     |> ignore
     0

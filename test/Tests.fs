@@ -3,24 +3,20 @@ module Tests
 open System
 open Xunit
 open Swensen.Unquote
-open App
 open Services
 open MyGetBot
 
 let private runTest f =
     async {
-        let mkReducer db =
-            Persistent.mkReducer MsgSerializer.info State.Empty Domain.reduce db
-
-        let db =
-            Persistent.make (new LiteDB.LiteDatabase(new IO.MemoryStream()))
+        let db = new LiteDB.LiteDatabase(new IO.MemoryStream())
+        let reducer = EventStore.mkReducer MsgSerializer.info State.Empty Domain.reduce db
 
         let log = ref []
         let mutable writeToBot = fun _ -> failwith "writeToBot not set"
 
         do!
             BotService.start
-                (mkReducer db)
+                reducer
                 (fun f ->
                     writeToBot <-
                         (fun msg ->
@@ -32,7 +28,7 @@ let private runTest f =
                     log := msg :: !log
                     async.Zero())
 
-        do! f writeToBot log (mkReducer db)
+        do! f writeToBot log reducer
     }
     |> Async.RunSynchronously
 
