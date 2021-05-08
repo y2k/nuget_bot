@@ -70,11 +70,8 @@ module BotService =
         listenTelegram
             (fun msg ->
                 async {
-                    let f1 state = fst <| Domain.handleMsg msg state
-                    let f2 state = snd <| Domain.handleMsg msg state
-                    let! state' = reducer.Invoke (fun s -> s, f1 s)
-                    let outMsg = f2 state'
-                    do! writeTelegram (fst msg) outMsg
+                    let! botResponse = reducer.Invoke (Domain.handleMsg msg)
+                    do! writeTelegram (fst msg) botResponse
                 })
 
 module SyncService =
