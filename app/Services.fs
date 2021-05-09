@@ -70,7 +70,7 @@ module BotService =
         listenTelegram
             (fun msg ->
                 async {
-                    let! botResponse = reducer.Invoke (Domain.handleMsg msg)
+                    let! botResponse = reducer.Invoke(Domain.handleMsg msg)
                     do! writeTelegram (fst msg) botResponse
                 })
 
@@ -101,12 +101,7 @@ module SyncService =
         else
             Map.empty, []
 
-    let run
-        (reducer : IReducer<State, Msg list>)
-        nugetGetLastVersion
-        githubGetAllReleases
-        pushToNuget
-        =
+    let run (reducer : IReducer<State, Msg list>) nugetGetLastVersion githubGetAllReleases pushToNuget =
         async {
             let! items = reducer.Invoke isNeedSync
 
