@@ -75,8 +75,10 @@ module BotService =
                 })
 
 module SyncService =
-    let private uploadNewVersion githubInfo pushToNuget url =
+    let private uploadNewVersion pushToNuget url githubInfo =
         async {
+            printfn "LOG: Upload nuget package. Url: %O, GithubInfo: %O" url githubInfo
+
             let! ngpackPath = DotnetBuild.buildNugetFromGithub githubInfo url
             do! pushToNuget ngpackPath
         }
@@ -101,20 +103,22 @@ module SyncService =
         else
             Map.empty, []
 
+    let private getNewUploadTask githubInfo currentVersion =
+        match githubInfo with
+        | Some (version, _ as rs) when (Some <| Version version) <> currentVersion -> Some rs
+        | _ -> None
+
     let run (reducer : IReducer<State, Msg list>) nugetGetLastVersion githubGetAllReleases pushToNuget =
         async {
             let! items = reducer.Invoke isNeedSync
 
-            let (items : Url list) = Domain.getAllUrl items
+            for projUrl in Domain.getAllUrl items do
+                let! githubInfo = getGithubVersion githubGetAllReleases projUrl
+                let! currentVersion = getVersionOnNuget nugetGetLastVersion projUrl
 
-            for url in items do
-                let! githubInfo = getGithubVersion githubGetAllReleases url
-                let! currentVersion = getVersionOnNuget nugetGetLastVersion url
-
-                match githubInfo with
-                | Some (version, _ as rs) when (Some <| Version version) <> currentVersion ->
-                    do! uploadNewVersion rs pushToNuget url
-                | _ -> ()
+                match getNewUploadTask githubInfo currentVersion with
+                | Some rs -> do! uploadNewVersion pushToNuget projUrl rs
+                | None -> ()
         }
 
     let runLoop reducer pushToNuget nugetGetLastVersion githubGetAllReleases =
