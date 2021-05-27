@@ -7,7 +7,7 @@ open MyGetBot
 module Github =
     open Octokit
 
-    let getAllReleases token (user : string) repo =
+    let getAllReleases token (user: string) repo =
         async {
             let github =
                 GitHubClient(ProductHeaderValue("nuget-bot"), Credentials = Credentials token)
@@ -24,12 +24,12 @@ module Nuget =
     open System.Text.Json
 
     [<CLIMutable>]
-    type NugetResponseItem = { upper : string }
+    type NugetResponseItem = { upper: string }
 
     [<CLIMutable>]
-    type NugetResponse = { items : NugetResponseItem [] }
+    type NugetResponse = { items: NugetResponseItem [] }
 
-    let private downloadJson (client : WebClient) (url : string) =
+    let private downloadJson (client: WebClient) (url: string) =
         async {
             let! response = client.AsyncDownloadString(Uri url) |> Async.catch
 
@@ -40,7 +40,7 @@ module Nuget =
                 | Error e -> raise e
         }
 
-    let getLastVersion (id : string) =
+    let getLastVersion (id: string) =
         async {
             let client = new WebClient()
             client.Headers.Add("User-Agent", "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.2; .NET CLR 1.0.3705;)")
@@ -71,11 +71,11 @@ module Telegram =
     open Telegram.Bot
     open Telegram.Bot.Types
 
-    type t = { client : TelegramBotClient }
+    type t = { client: TelegramBotClient }
 
     let mkClient token = { client = TelegramBotClient token }
 
-    let private clearHistory offset (client : TelegramBotClient) =
+    let private clearHistory offset (client: TelegramBotClient) =
         async {
             let stop = ref false
 
@@ -116,24 +116,45 @@ module Telegram =
         |> Async.AwaitTask
         |> Async.Ignore
 
+let mkReducer reduce =
+    { new IReducer<State, Msg list> with
+        member _.Invoke f =
+            async {
+                let! oldDb = reduce (fun db -> db, f db |> snd)
+                return f oldDb |> fst
+            } }
+
 [<EntryPoint>]
 let main argv =
-    IO.Directory.CreateDirectory "__data" |> ignore
+    async {
+        IO.Directory.CreateDirectory "__data" |> ignore
+        let db = new LiteDB.LiteDatabase("__data/log.db")
 
-    let reducer =
-        new LiteDB.LiteDatabase("__data/log.db")
-        |> EventStore.mkReducer MsgSerializer.info State.Empty Domain.reduce
+        let mygetToken, telegramToken, githubToken = argv.[0], argv.[1], argv.[2]
+        let tgClient = Telegram.mkClient telegramToken
 
-    let mygetToken, telegramToken, githubToken = argv.[0], argv.[1], argv.[2]
-    let client = Telegram.mkClient telegramToken
+        let store = EventPersistent.Store.init ()
 
-    Async.Parallel [ SyncService.runLoop
-                         reducer
-                         (Nuget.pushToNuget mygetToken)
-                         Nuget.getLastVersion
-                         (Github.getAllReleases githubToken)
-                     BotService.start reducer (Telegram.listenUpdates client) (Telegram.writeTelegram client) ]
+        let commonStore =
+            EventPersistent.Store.make store State.Empty Domain.reduce
+            |> mkReducer
+
+        do! EventStore.restore db MsgSerializer.deserialize (EventPersistent.Store.make store () always)
+
+        do!
+            [ EventStore.dumpEvents
+                db
+                MsgSerializer.serialize
+                (EventPersistent.Store.make store EventStore.empty EventStore.merge)
+              SyncService.runLoop
+                  commonStore
+                  (Nuget.pushToNuget mygetToken)
+                  Nuget.getLastVersion
+                  (Github.getAllReleases githubToken)
+              BotService.start commonStore (Telegram.listenUpdates tgClient) (Telegram.writeTelegram tgClient) ]
+            |> Async.Parallel
+            |> Async.Ignore
+    }
     |> Async.RunSynchronously
-    |> ignore
 
     0

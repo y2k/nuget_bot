@@ -2,40 +2,39 @@ module MyGetBot.EventStore
 
 open LiteDB
 
-let mkReducer
-    (getId : 'at -> int, serialize : 'event -> 'at option, deserialize : 'at -> 'event)
-    (init : 's)
-    (f : 's -> 'event -> 's)
-    (db : LiteDatabase)
-    =
-    let col = db.GetCollection<'at>("log")
-    let index = ref 0
-    let state = ref init
+type 'msg State = { queue: 'msg list }
 
-    { new IReducer<'s, 'event list> with
-        member _.Invoke fxs =
-            async {
-                db.BeginTrans() |> ignore
+let empty : 'msg State = { queue = [] }
 
-                col.Find(Query.GT("_id", BsonValue.op_Implicit !index))
-                |> Seq.iter
-                    (fun a ->
-                        let event = deserialize a
-                        index := getId a
-                        state := f !state event)
+let merge s e = { s with queue = e :: s.queue }
 
-                let result, events = fxs !state
+let restore (db: LiteDatabase) (deserialize: 'json -> 'event) reduce =
+    async {
+        let col = db.GetCollection<'json>("log")
 
-                for event in events do
-                    state := f !state event
+        let events =
+            col.FindAll() |> Seq.map deserialize |> Seq.toList
 
-                    serialize event
-                    |> Option.iter
-                        (fun a ->
-                            col.Insert a |> ignore
-                            index := getId a)
+        do! reduce (fun db -> db, events) |> Async.Ignore
+    }
 
-                db.Commit() |> ignore
+let dumpEvents (db: LiteDatabase) (serialize: 'event -> 'json option) reduce =
+    async {
+        while true do
+            let col = db.GetCollection<'json>("log")
 
-                return result
-            } }
+            db.BeginTrans() |> ignore
+
+            let! (store: _ State) = reduce (fun db -> empty, [])
+
+            for event in store.queue |> List.rev do
+                let x = serialize event
+
+                match x with
+                | Some a -> col.Insert a |> ignore
+                | None -> ()
+
+            db.Commit() |> ignore
+
+            do! Async.Sleep 5_000
+    }

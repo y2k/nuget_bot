@@ -2,14 +2,14 @@ module MyGetBot.MsgSerializer
 
 [<CLIMutable>]
 type t =
-    { id : int
-      tag : int
-      user : string
-      url : string }
+    { id: int
+      tag: int
+      user: string
+      url: string }
 
 let private getId x = x.id
 
-let private serialize =
+let serialize =
     function
     | SyncRequested _ -> None
     | UrlAdded (User user, Url url) ->
@@ -25,7 +25,7 @@ let private serialize =
           url = url }
         |> Some
 
-let private deserialize =
+let deserialize =
     function
     | { tag = 1; user = user; url = url } -> UrlAdded(User user, Url url)
     | { tag = 2; user = user; url = url } -> UrlRemoved(User user, Url url)

@@ -9,7 +9,11 @@ open MyGetBot
 let private runTest f =
     async {
         let db = new LiteDB.LiteDatabase(new IO.MemoryStream())
-        let reducer = EventStore.mkReducer MsgSerializer.info State.Empty Domain.reduce db
+
+        let commonStore =
+            EventPersistent.Store.make (EventPersistent.Store.init ()) State.Empty Domain.reduce
+        let reducer = App.mkReducer commonStore
+        // let reducer = EventStore.mkReducer MsgSerializer.info State.Empty Domain.reduce db
 
         let log = ref []
         let mutable writeToBot = fun _ -> failwith "writeToBot not set"

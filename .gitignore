@@ -5,3 +5,5 @@ obj/
 *.fsx
 .idea/
 *.user
+.fake
+__data/
