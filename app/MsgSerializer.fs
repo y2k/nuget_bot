@@ -2,7 +2,8 @@ module MyGetBot.MsgSerializer
 
 [<CLIMutable>]
 type t =
-    { tag: int
+    { id: int
+      tag: int
       user: string
       url: string }
 
@@ -10,12 +11,14 @@ let serialize =
     function
     | SyncRequested _ -> None
     | UrlAdded (User user, Url url) ->
-        { tag = 1
+        { id = 0
+          tag = 1
           user = user
           url = url }
         |> Some
     | UrlRemoved (User user, Url url) ->
-        { tag = 2
+        { id = 0
+          tag = 2
           user = user
           url = url }
         |> Some

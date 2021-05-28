@@ -4,39 +4,40 @@ type User = User of string
 type Url = Url of string
 
 type State =
-    { items : Map<User, Url Set>
-      syncRequested : bool }
+    { items: Map<User, Url Set>
+      syncRequested: bool }
     static member Empty =
         { items = Map.empty
           syncRequested = false }
 
 type Msg =
     | SyncRequested of bool
-    | UrlAdded of user : User * url : Url
-    | UrlRemoved of user : User * url : Url
+    | UrlAdded of user: User * url: Url
+    | UrlRemoved of user: User * url: Url
 
 type IReducer<'state, 'events> =
     abstract member Invoke : ('state -> 'r * 'events) -> 'r Async
 
 module ParseMsg =
     type t =
-        | Start
         | Add of string
         | Ls
         | Sync
         | Unknown
 
-    let parseMessage (msg : string) : t =
+    let parseMessage (msg: string) : t =
         match msg.Split ' ' |> List.ofSeq with
         | [ "/add"; url ] -> Add url
         | [ "/ls" ] -> Ls
-        | [ "/start" ] -> Start
         | [ "/sync" ] -> Sync
         | _ -> Unknown
 
 module MessageGenerator =
-    let startMessage =
-        "Commands (ver 0.1):\n/ls - list of packages\n/add <github url to (f|c)proj> - add package"
+    let startMessage = """
+Commands (ver 0.2):
+/ls - list of packages
+/add <github url to (f|c)proj> - add package
+/sync - sync your repositories"""
 
     let formatMessage user items =
         items
@@ -53,7 +54,7 @@ module Domain =
     open System.Text.RegularExpressions
 
     let updateProj user repo version xml =
-        let replace s (r : string) xml = Regex.Replace(xml, s, r)
+        let replace s (r: string) xml = Regex.Replace(xml, s, r)
 
         xml
         |> replace "<PackageId>.+?</PackageId>" ""
@@ -99,15 +100,14 @@ module Domain =
         parseUrl githubUrl
         |> Option.map (fun x -> $"%s{x.user}.%s{x.repo}")
 
-    let private tryAddUrl user (_ : State) url : Msg list =
+    let private tryAddUrl user (_: State) url : Msg list =
         parseUrl url
         |> Option.map (fun _ -> [ UrlAdded(user, url) ])
         |> Option.defaultValue []
 
-    let handleMsg (user, msg) (state : State) : string * Msg list =
+    let handleMsg (user, msg) (state: State) : string * Msg list =
         match ParseMsg.parseMessage msg with
         | ParseMsg.Sync -> "Sync scheduled", [ SyncRequested true ]
         | ParseMsg.Add url -> MessageGenerator.formatLsMessage, tryAddUrl user state (Url url)
         | ParseMsg.Ls -> MessageGenerator.formatMessage user state.items, []
-        | ParseMsg.Start -> MessageGenerator.startMessage, []
-        | ParseMsg.Unknown -> $"Unknown command: %s{msg}", []
+        | ParseMsg.Unknown -> MessageGenerator.startMessage, []
