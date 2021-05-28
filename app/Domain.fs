@@ -1,5 +1,11 @@
 namespace MyGetBot
 
+module Result =
+    let inline fold fOk fError =
+        function
+        | Ok x -> fOk x
+        | Error e -> fError e
+
 type User = User of string
 type Url = Url of string
 
@@ -18,27 +24,7 @@ type Msg =
 type IReducer<'state, 'events> =
     abstract member Invoke : ('state -> 'r * 'events) -> 'r Async
 
-module ParseMsg =
-    type t =
-        | Add of string
-        | Ls
-        | Sync
-        | Unknown
-
-    let parseMessage (msg: string) : t =
-        match msg.Split ' ' |> List.ofSeq with
-        | [ "/add"; url ] -> Add url
-        | [ "/ls" ] -> Ls
-        | [ "/sync" ] -> Sync
-        | _ -> Unknown
-
 module MessageGenerator =
-    let startMessage = """
-Commands (ver 0.2):
-/ls - list of packages
-/add <github url to (f|c)proj> - add package
-/sync - sync your repositories"""
-
     let formatMessage user items =
         items
         |> Map.tryFind user
@@ -47,8 +33,6 @@ Commands (ver 0.2):
         |> List.map (fun (Url url) -> url)
         |> List.fold (fun a x -> a + "\n- " + x) ""
         |> fun x -> sprintf "Your subscriptions:\n%s" <| x.Trim '\n'
-
-    let formatLsMessage = "Operation successful"
 
 module Domain =
     open System.Text.RegularExpressions
@@ -105,9 +89,18 @@ module Domain =
         |> Option.map (fun _ -> [ UrlAdded(user, url) ])
         |> Option.defaultValue []
 
-    let handleMsg (user, msg) (state: State) : string * Msg list =
-        match ParseMsg.parseMessage msg with
-        | ParseMsg.Sync -> "Sync scheduled", [ SyncRequested true ]
-        | ParseMsg.Add url -> MessageGenerator.formatLsMessage, tryAddUrl user state (Url url)
-        | ParseMsg.Ls -> MessageGenerator.formatMessage user state.items, []
-        | ParseMsg.Unknown -> MessageGenerator.startMessage, []
+    module P = CommandParser
+
+    let handleMsg (user, msg) (state: State) =
+        [ P.Rule [ P.Name "sync"
+                   P.Description "Schedule sync your repositories"
+                   P.Return(lazy ("Sync scheduled", [ SyncRequested true ])) ]
+          P.Rule [ P.Name "ls"
+                   P.Description "Show list your of packages"
+                   P.Return(lazy (MessageGenerator.formatMessage user state.items, [])) ]
+          P.Rule [ P.Name "add"
+                   P.Description "Add github url to (f|c)proj package"
+                   P.Param <| P.StringParam "url"
+                   P.OnCallback(fun url -> "Operation successful", tryAddUrl user state (Url url)) ] ]
+        |> P.eval msg
+        |> Result.fold id (fun msg -> sprintf "Commands (ver 0.2):\n%s" msg, [])

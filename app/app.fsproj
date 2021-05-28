@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="CommandParser.fs" />
     <Compile Include="Domain.fs" />
     <Compile Include="MsgSerializer.fs" />
     <Compile Include="Services.fs" />
