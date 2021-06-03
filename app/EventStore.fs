@@ -20,12 +20,12 @@ let restore (db: LiteDatabase) (deserialize: 'json -> 'event) reduce =
 
 let dumpEvents (db: LiteDatabase) (serialize: 'event -> 'json option) reduce =
     async {
+        let col = db.GetCollection<'json>("log")
+
         while true do
-            let col = db.GetCollection<'json>("log")
+            let! (store: _ State) = reduce (fun db -> empty, [])
 
             db.BeginTrans() |> ignore
-
-            let! (store: _ State) = reduce (fun db -> empty, [])
 
             for event in store.queue |> List.rev do
                 let x = serialize event
